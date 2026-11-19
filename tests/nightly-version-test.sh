@@ -8,71 +8,42 @@ failed=0
 check() {
 	want=$1
 	shift
-	got=$(sh scripts/nightly-version.sh "$dir/releases" "$dir/nightlies" "$@" 2>/dev/null) || got="(refused)"
+	got=$(sh scripts/nightly-version.sh "$dir/tags" "$@" 2>/dev/null) || got="(refused)"
 	if [ "$got" != "$want" ]; then
 		echo "FAIL: $* gave $got, want $want" >&2
 		failed=1
 	fi
 }
-tags() { printf '%s\n' "$@" >"$dir/releases"; }
-nightlies() { printf '%s\n' "$@" >"$dir/nightlies"; }
+tags() { printf '%s\n' "$@" >"$dir/tags"; }
 
-nightlies
+# The first of the day, from a full commit.
 tags
-check 0.0.1-nightly.20261119.1.g0123456 20261119 0123456789abcdef
-tags v1.2.3 v1.10.0 v1.9.9 keyring-2026.11.14
-check 1.10.1-nightly.20261119.1.gabcdef0 20261119 abcdef0123
-tags v1.2.3 v1.3.0-b.2 v1.3.0-rc.1
-check 1.3.0-nightly.20261119.1.gabcdef0 20261119 abcdef0
-# The older -rcN tags, which the Debian releases used, count too.
-tags v0.4.0-rc1 v0.4.0-rc2
-check 0.4.0-nightly.20261119.1.gabcdef0 20261119 abcdef0
-tags v0.4.0-rc2 v0.4.0
-check 0.4.1-nightly.20261119.1.gabcdef0 20261119 abcdef0
-tags v1.2.3 v1.3.0-rc.1 v1.3.0
-nightlies 1.3.1-nightly.20261119.1.g1111111 1.3.1-nightly.20261119.2.g2222222 1.3.1-nightly.20261118.1.g3333333 nightly \
-	1.3.1-nightly.20261119.2.g2222222-amd64 1.3.1-nightly.20261119.2.g2222222-arm64 staging-1.3.1-nightly.20261119.2.g2222222 \
-	1.3.1-nightly.20261119.3.g4444444-amd64
-check 1.3.1-nightly.20261119.3.gabcdef0 20261119 abcdef0
-# A pruned nightly does not let N collide with one still published.
-nightlies 1.3.1-nightly.20261119.2.g2222222
-check 1.3.1-nightly.20261119.3.gabcdef0 20261119 abcdef0
-nightlies 1.3.1-nightly.20261119.9.g2222222 1.3.1-nightly.20261119.10.g3333333
-check 1.3.1-nightly.20261119.11.gabcdef0 20261119 abcdef0
-# Patch numbers compare as numbers.
-tags v1.2.9 v1.2.10
-nightlies
-check 1.2.11-nightly.20261119.1.gabcdef0 20261119 abcdef0
-# The highest core in beta, or in candidates only, is the version.
-tags v1.2.3 v1.3.0-b.1
-check 1.3.0-nightly.20261119.1.gabcdef0 20261119 abcdef0
-tags v1.2.3 v1.3.0-rc.4
-check 1.3.0-nightly.20261119.1.gabcdef0 20261119 abcdef0
-# Tags outside the grammar, and numbers too long to count, do not move it.
-tags v1.2.3 xv9.0.0 v9.0 v9.0.0-c.1 v9.0.0-rc.0 v1000000000.0.0
-check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
-# A nightly tag outside the grammar, N 0 or a short commit, does not count.
-nightlies 1.2.4-nightly.20261119.0.g1111111 1.2.4-nightly.20261119.5.g111111 x1.2.4-nightly.20261119.7.g1111111
-check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
-# A full commit, as the workflow passes, and lengths up to 40.
-check 1.2.4-nightly.20261119.1.g0123456 20261119 0123456789abcdef0123456789abcdef01234567
-check 1.2.4-nightly.20261119.1.g0123456 20261119 0123456789abcdef0123456789abcdef0123
-# An N too long to count does not overflow.
-nightlies 1.2.4-nightly.20261119.99999999999999999999.g1111111
-check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
-# A released core is matched literally: v1-2-4 does not release 1.2.4.
-tags v1.2.3 v1.2.4-rc.1 v1-2-4
-nightlies
-check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
-check "(refused)" 2026111 abcdef0
-check "(refused)" 202611190 abcdef0
-check "(refused)" 20261119 abcdef
-check "(refused)" 20261119 0123456789abcdef0123456789abcdef012345678
-check "(refused)" 20261119 "$(printf 'abcdef0\n1234567')"
-check "(refused)" 20261119 xyz
-rm "$dir/nightlies"
+check v2026-11-19.1.0123abc 2026-11-19 0123abc89abcdef0123456789abcdef01234567
+# Another day's nightlies do not count; that day's highest N does, as a number.
+tags v2026-11-18.7.aaaaaaa v2026-11-19.2.bbbbbbb v2026-11-19.10.ccccccc
+check v2026-11-19.11.abcdef0 2026-11-19 abcdef0
+tags v2026-11-19.2.bbbbbbb
+check v2026-11-19.3.abcdef0 2026-11-19 abcdef0
+# Only whole nightly names count.
+tags v2026-11-19.5.bbbbbbb-x xv2026-11-19.6.bbbbbbb v2026-11-19.0.bbbbbbb v2026-11-19.7.bbbbbb \
+	v2026-11-19.99999999999.bbbbbbb nightly README
+check v2026-11-19.1.abcdef0 2026-11-19 abcdef0
 check "(refused)" 20261119 abcdef0
-nightlies
-rm "$dir/releases"
-check "(refused)" 20261119 abcdef0
+check "(refused)" 2026-11-19x abcdef0
+check "(refused)" 2026-21-19 abcdef0
+check "(refused)" 2026-13-19 abcdef0
+check "(refused)" 2026-00-19 abcdef0
+check "(refused)" 2026-11-00 abcdef0
+check "(refused)" 2026-11-32 abcdef0
+check "(refused)" 2026-02-31 abcdef0
+check v2026-12-31.1.abcdef0 2026-12-31 abcdef0
+check v2028-02-29.1.abcdef0 2028-02-29 abcdef0
+tags v2026-11-19.999999999.bbbbbbb
+check "(refused)" 2026-11-19 abcdef0
+check "(refused)" 2026-11-19 abcdef
+check "(refused)" 2026-11-19 0123456789abcdef0123456789abcdef012345678
+check "(refused)" 2026-11-19 ABCDEF0
+check "(refused)" 2026-11-19 "$(printf 'abcdef0\n1234567')"
+rm "$dir/tags"
+check "(refused)" 2026-11-19 abcdef0
 exit "$failed"

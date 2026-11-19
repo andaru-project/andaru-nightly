@@ -20,14 +20,23 @@ check() {
 check ""
 check "" README v1.2.3
 # The latest date wins, then N as a number.
-check 1.3.1-nightly.20261119.10.gccccccc 1.3.1-nightly.20261118.12.gaaaaaaa 1.3.1-nightly.20261119.2.gbbbbbbb \
-	1.3.1-nightly.20261119.10.gccccccc
-# On one day, a newer core wins over an older core's higher N, and cores compare as numbers.
-check 0.0.10-nightly.20261119.1.gccccccc 0.0.9-nightly.20261119.2.gbbbbbbb 0.0.10-nightly.20261119.1.gccccccc
-check 0.0.2-nightly.20261119.1.gccccccc 0.0.1-nightly.20261119.2.gbbbbbbb 0.0.2-nightly.20261119.1.gccccccc
-# Only whole nightly names count: no prefix, suffix, architecture or staging tag.
-check 1.3.1-nightly.20261119.1.gaaaaaaa 1.3.1-nightly.20261119.1.gaaaaaaa test-nightly.20991231.1.gabcdef0 \
-	1.3.1-nightly.20991231.1.gabcdef0-amd64 staging-1.3.1-nightly.20991231.1.gabcdef0 1.3.1-nightly.20991231.0.gabcdef0
+check v2026-11-19.10.ccccccc v2026-11-18.12.aaaaaaa v2026-11-19.2.bbbbbbb v2026-11-19.10.ccccccc
+check v2027-01-02.1.ddddddd v2026-12-31.9.aaaaaaa v2027-01-02.1.ddddddd
+# Only whole nightly names count.
+check v2026-11-19.1.aaaaaaa v2026-11-19.1.aaaaaaa xv2099-12-31.1.abcdef0 v2099-12-31.1.abcdef0-amd64 \
+	staging-v2099-12-31.1.abcdef0 v2099-12-31.0.abcdef0
+# -c gives the newest nightly's commit, which the workflow compares with main's; nothing when there is none.
+printf '%s\n' v2026-11-18.12.aaaaaaa v2026-11-19.2.0123abc >"$dir/tags"
+if [ "$(sh scripts/nightly-newest.sh -c "$dir/tags")" != 0123abc ]; then
+	echo "FAIL: -c did not give the newest nightly's commit" >&2
+	failed=1
+fi
+: >"$dir/tags"
+# Not even an empty line: no output at all.
+if [ "$({ sh scripts/nightly-newest.sh -c "$dir/tags"; sh scripts/nightly-newest.sh "$dir/tags"; } | wc -c)" -ne 0 ]; then
+	echo "FAIL: -c gave a commit with no nightly" >&2
+	failed=1
+fi
 rm "$dir/tags"
 if sh scripts/nightly-newest.sh "$dir/tags" >/dev/null 2>&1; then
 	echo "FAIL: a missing tag list was accepted" >&2

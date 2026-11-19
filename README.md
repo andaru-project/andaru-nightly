@@ -13,9 +13,8 @@ example to pick up a new Fedora CoreOS base. A `FCOS_BASE` variable pins the bas
 
 It builds nothing until Andaru's `main` ships `image/cosign-nightly.pub`, the key the image trusts for nightlies.
 
-**Versions** are `<next version>-nightly.<YYYYMMDD>.<N>.g<commit>`, for example `1.3.1-nightly.20261119.2.g0123456`.
-The next version is the core of Andaru's highest version tag, one patch up once that core is released. `N` is one
-above the highest `N` that day's nightlies of that version have, so a pruned nightly never lets two share one.
+**Versions** are `v<YYYY-MM-DD>.<N>.<commit>`, for example `v2026-11-19.2.0123abc`: the UTC date, the day's build
+number, and the first 7 characters of Andaru's commit. `N` is one above the highest `N` that day's nightlies have.
 [`scripts/nightly-version.sh`](scripts/nightly-version.sh) computes it, and `tests/nightly-version-test.sh` checks it.
 
 **Signing.** The `nightly-signing` environment, which only `main` can use, holds the nightly cosign key. Andaru's
