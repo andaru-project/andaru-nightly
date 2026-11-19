@@ -22,3 +22,4 @@ jobs:
           set -eu
           shellcheck scripts/*.sh tests/*.sh
           sh tests/nightly-version-test.sh
+          sh tests/nightly-newest-test.sh
