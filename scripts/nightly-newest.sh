@@ -19,7 +19,9 @@ fi
 # C collation: the dates compare byte for byte, whatever the runner's locale.
 newest=$({ grep -Ex 'v[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]{0,8}\.[0-9a-f]{7}' "$tags" || :; } |
 	LC_ALL=C sort -t. -k1,1 -k2,2n | tail -n 1)
-if [ "$commit" = true ]; then
+if [ -z "$newest" ]; then
+	exit 0
+elif [ "$commit" = true ]; then
 	printf '%s\n' "${newest##*.}"
 else
 	printf '%s\n' "$newest"

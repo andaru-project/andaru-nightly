@@ -14,9 +14,8 @@ example to pick up a new Fedora CoreOS base. A `FCOS_BASE` variable pins the bas
 It builds nothing until Andaru's `main` ships `image/cosign-nightly.pub`, the key the image trusts for nightlies.
 
 **Versions** are `v<YYYY-MM-DD>.<N>.<commit>`, for example `v2026-11-19.2.0123abc`: the UTC date, the day's build
-number, and the first 7 characters of Andaru's commit. `N` is one above the highest `N` that day's nightlies have, so
-a deleted nightly never lets two share one. [`scripts/nightly-version.sh`](scripts/nightly-version.sh) computes it,
-and `tests/nightly-version-test.sh` checks it.
+number, and the first 7 characters of Andaru's commit. `N` is one above the highest `N` that day's nightlies have.
+[`scripts/nightly-version.sh`](scripts/nightly-version.sh) computes it, and `tests/nightly-version-test.sh` checks it.
 
 **Signing.** The `nightly-signing` environment, which only `main` can use, holds the nightly cosign key. Andaru's
 image trusts that key only for `ghcr.io/andaru-project/andaru-nightly`, so it can never sign something a box would take

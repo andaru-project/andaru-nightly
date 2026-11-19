@@ -32,7 +32,8 @@ if [ "$(sh scripts/nightly-newest.sh -c "$dir/tags")" != 0123abc ]; then
 	failed=1
 fi
 : >"$dir/tags"
-if [ -n "$(sh scripts/nightly-newest.sh -c "$dir/tags")" ]; then
+# Not even an empty line: no output at all.
+if [ "$({ sh scripts/nightly-newest.sh -c "$dir/tags"; sh scripts/nightly-newest.sh "$dir/tags"; } | wc -c)" -ne 0 ]; then
 	echo "FAIL: -c gave a commit with no nightly" >&2
 	failed=1
 fi
