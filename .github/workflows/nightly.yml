@@ -73,7 +73,7 @@ jobs:
           # GHCR answers a package or tag that does not exist with these registry errors; anything else (an outage, a
           # missing tool) stops the run, so it is never taken for a first run that would start N again at 1. GHCR also
           # says denied when this token lost access to an existing package: that run then fails at its first push.
-          absent() { grep -qE 'requested access to the resource is denied|manifest unknown|name unknown|MANIFEST_UNKNOWN|NAME_UNKNOWN|DENIED' "$1"; }
+          absent() { grep -qE 'requested access to the resource is denied|registry 403 \(Forbidden\)|manifest unknown|name unknown|MANIFEST_UNKNOWN|NAME_UNKNOWN|DENIED' "$1"; }
           # The last nightly records the commit it was built from; none yet means build.
           if skopeo inspect --no-tags "docker://$IMAGE:nightly" >nightly.json 2>inspect.err; then
             last=$(jq -r '.Labels["org.opencontainers.image.revision"] // empty' nightly.json)
