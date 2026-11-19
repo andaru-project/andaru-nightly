@@ -1,0 +1,185 @@
+name: Nightly
+
+# Every night, when andaru-project/andaru's main moved since the last nightly, builds Andaru's image from it for both
+# architectures, signs it with the nightly-signing environment's cosign key, and only then tags it with its version
+# and "nightly". Boxes trust that key only for ghcr.io/andaru-project/andaru-nightly, never for releases.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  SOURCE: andaru-project/andaru
+  IMAGE: ghcr.io/andaru-project/andaru-nightly
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      commit: ${{ steps.plan.outputs.commit }}
+      version: ${{ steps.plan.outputs.version }}
+      base: ${{ steps.plan.outputs.base }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Decide
+        id: plan
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          commit=$(git ls-remote "https://github.com/$SOURCE" refs/heads/main | cut -f1)
+          [ -n "$commit" ]
+          # The last nightly records the commit it was built from; none yet means build.
+          last=$(skopeo inspect --no-tags "docker://$IMAGE:nightly" 2>/dev/null |
+            jq -r '.Labels["org.opencontainers.image.revision"] // empty') || last=
+          if [ "$commit" = "$last" ]; then
+            echo "main is still at $commit, the last nightly's commit: nothing to build" >>"$GITHUB_STEP_SUMMARY"
+            echo build=false >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git ls-remote --tags --refs "https://github.com/$SOURCE" 'v*' | sed 's#.*refs/tags/##' >release-tags
+          if ! skopeo list-tags "docker://$IMAGE" >listing.json 2>listing.err; then
+            # Only a package that does not exist yet has no tags; anything else stops the run.
+            grep -qiE 'not found|name unknown|unknown repository' listing.err
+            echo '{"Tags":[]}' >listing.json
+          fi
+          jq -r '.Tags[]' listing.json >nightly-tags
+          version=$(sh scripts/nightly-version.sh release-tags nightly-tags "$(date -u +%Y%m%d)" "$commit")
+          # One base digest for both architectures: stable may move between the two builds.
+          base="quay.io/fedora/fedora-coreos@sha256:$(skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)"
+          {
+            echo build=true
+            echo "commit=$commit"
+            echo "version=$version"
+            echo "base=$base"
+          } >>"$GITHUB_OUTPUT"
+
+  image:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - name: Check out Andaru at that commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: andaru-project/andaru
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+
+      - name: Build and check
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          BASE: ${{ needs.plan.outputs.base }}
+          COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          set -eu
+          podman build -f image/Containerfile --build-arg VERSION="$VERSION" --build-arg BASE_IMAGE="$BASE" \
+            --label org.opencontainers.image.revision="$COMMIT" -t andaru:nightly .
+          sh scripts/ci/image-smoke.sh andaru:nightly "$VERSION"
+
+      - name: Push the unsigned architecture image
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          printf '%s\n' "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # Boxes never follow these tags: nothing signs them, so the signature policy refuses them.
+          podman push --digestfile "digest-$ARCH" andaru:nightly "docker://$IMAGE:$VERSION-$ARCH"
+
+      # The digest, not the tag, goes into the index: a tag could be moved between this push and the signature.
+      - name: Keep the digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digest-${{ matrix.arch }}
+          if-no-files-found: error
+
+  sign:
+    needs: [plan, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The nightly cosign key is a secret of this environment, which admits only main.
+    environment: nightly-signing
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out Andaru at that commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: andaru-project/andaru
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+
+      - name: Collect the digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Install cosign
+        run: |
+          set -eu
+          # cosign 2.6 stores the signature as a .sig attachment, the form containers/image verifies.
+          curl -fsSLo cosign https://github.com/sigstore/cosign/releases/download/v2.6.5/cosign-linux-amd64
+          echo "c3b4f5410e608af03a5eb0aaac84a4313d8da131248e08ff1759ac70c79d1644  cosign" | sha256sum -c -
+          sudo install -m 0755 cosign /usr/local/bin/cosign
+
+      - name: Assemble, sign, then tag
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          TOKEN: ${{ github.token }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          set -eu
+          printf '%s\n' "$TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          printf '%s\n' "$TOKEN" | cosign login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          podman manifest create andaru:index
+          for arch in amd64 arm64; do
+            podman manifest add andaru:index "docker://$IMAGE@$(cat "digest-$arch")"
+          done
+          # The index goes up under a staging tag nothing follows; its digest is what gets signed.
+          podman manifest push --all --digestfile digest andaru:index "docker://$IMAGE:staging-$VERSION"
+          digest=$(cat digest)
+          # Recursive: a box pulls its own architecture's manifest, which needs a signature of its own.
+          cosign sign --yes --recursive --key env://COSIGN_PRIVATE_KEY "$IMAGE@$digest"
+          # The nightly key the image itself trusts must verify what boxes will pull.
+          for ref in "$IMAGE@$digest" "$IMAGE@$(cat digest-amd64)" "$IMAGE@$(cat digest-arm64)"; do
+            cosign verify --key image/cosign-nightly.pub "$ref" >/dev/null
+          done
+          for tag in "$VERSION" nightly; do
+            skopeo copy --all --preserve-digests "docker://$IMAGE@$digest" "docker://$IMAGE:$tag"
+          done
+          echo "$IMAGE@$digest: $VERSION nightly" >>"$GITHUB_STEP_SUMMARY"
