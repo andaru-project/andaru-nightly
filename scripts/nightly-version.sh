@@ -12,7 +12,8 @@ die() {
 tags=${1:?nightly tags} date=${2:?date} commit=${3:?commit}
 if [ ! -r "$tags" ]; then die "cannot read $tags"; fi
 # case, not grep: grep would accept a value with a second line.
-case $date in [0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]) ;; *) die "bad date" ;; esac
+case $date in [0-9][0-9][0-9][0-9]-0[1-9]-?? | [0-9][0-9][0-9][0-9]-1[0-2]-??) ;; *) die "bad date" ;; esac
+case $date in *-0[1-9] | *-[12][0-9] | *-3[01]) ;; *) die "bad date" ;; esac
 case $commit in *[!0-9a-f]*) die "bad commit" ;; esac
 if [ "${#commit}" -lt 7 ] || [ "${#commit}" -gt 40 ]; then die "bad commit"; fi
 

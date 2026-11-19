@@ -71,9 +71,9 @@ jobs:
           commit=$(refs "https://github.com/$SOURCE" refs/heads/main | awk -F'\t' '$2 == "refs/heads/main" { print $1 }')
           [ "${#commit}" = 40 ] || { echo "::error::no single commit for $SOURCE main: '$commit'"; exit 1; }
           refs --tags --refs "https://github.com/$GITHUB_REPOSITORY" | sed 's#.*refs/tags/##' >nightly-tags
-          # The newest nightly's name ends in g and the first 7 characters of its commit; none yet is an empty answer.
+          # The commit the newest nightly was built from, by its first 7 characters; none yet is an empty answer.
           newest=$(sh scripts/nightly-newest.sh nightly-tags)
-          if [ "${newest##*.g}" = "${commit:0:7}" ] && [ "$FORCE" != true ]; then
+          if [ "$(sh scripts/nightly-newest.sh -c nightly-tags)" = "${commit:0:7}" ] && [ "$FORCE" != true ]; then
             echo "main is still at $commit, the last nightly's commit ($newest): nothing to build" >>"$GITHUB_STEP_SUMMARY"
             echo build=false >>"$GITHUB_OUTPUT"
             exit 0

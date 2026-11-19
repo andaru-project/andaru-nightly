@@ -31,6 +31,11 @@ check v2026-11-19.1.abcdef0 2026-11-19 abcdef0
 check "(refused)" 20261119 abcdef0
 check "(refused)" 2026-11-19x abcdef0
 check "(refused)" 2026-21-19 abcdef0
+check "(refused)" 2026-13-19 abcdef0
+check "(refused)" 2026-00-19 abcdef0
+check "(refused)" 2026-11-00 abcdef0
+check "(refused)" 2026-11-32 abcdef0
+check v2026-12-31.1.abcdef0 2026-12-31 abcdef0
 check "(refused)" 2026-11-19 abcdef
 check "(refused)" 2026-11-19 0123456789abcdef0123456789abcdef012345678
 check "(refused)" 2026-11-19 ABCDEF0
