@@ -170,6 +170,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.sign.outputs.digest }}
     steps:
       - name: Check out Andaru at that commit
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -192,7 +194,8 @@ jobs:
           echo "c3b4f5410e608af03a5eb0aaac84a4313d8da131248e08ff1759ac70c79d1644  cosign" | sha256sum -c -
           sudo install -m 0755 cosign /usr/local/bin/cosign
 
-      - name: Assemble, sign, then tag
+      - name: Assemble and sign
+        id: sign
         env:
           VERSION: ${{ needs.plan.outputs.version }}
           TOKEN: ${{ github.token }}
@@ -215,13 +218,11 @@ jobs:
           for ref in "$IMAGE@$digest" "$IMAGE@$(cat digest-amd64)" "$IMAGE@$(cat digest-arm64)"; do
             cosign verify --key image/cosign-nightly.pub "$ref" >/dev/null
           done
-          for tag in "$VERSION" nightly; do
-            skopeo copy --all --preserve-digests "docker://$IMAGE@$digest" "docker://$IMAGE:$tag"
-          done
-          echo "$IMAGE@$digest: $VERSION nightly" >>"$GITHUB_STEP_SUMMARY"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
 
-  # The tag that records the published nightly, which the next night's plan reads. Last, and with its own token: it
-  # needs to write this repository, and nothing else may.
+  # The tag that records the nightly, which the next night's plan reads. Before the image tags: creating a tag that
+  # exists fails, so a version, once published, never names another build. Its own token, the only one that writes
+  # this repository.
   record:
     needs: [plan, sign]
     runs-on: ubuntu-24.04
@@ -234,3 +235,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$VERSION" -f sha="$GITHUB_SHA" >/dev/null
+
+  # Only a signed and recorded digest gets the names boxes follow.
+  publish:
+    needs: [plan, sign, record]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    steps:
+      - name: Tag the image with its version and nightly
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          DIGEST: ${{ needs.sign.outputs.digest }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          printf '%s\n' "$TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for tag in "$VERSION" nightly; do
+            skopeo copy --all --preserve-digests "docker://$IMAGE@$DIGEST" "docker://$IMAGE:$tag"
+          done
+          echo "$IMAGE@$DIGEST: $VERSION nightly" >>"$GITHUB_STEP_SUMMARY"

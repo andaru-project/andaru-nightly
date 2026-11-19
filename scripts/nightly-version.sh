@@ -35,5 +35,5 @@ fi
 prefix="$next-nightly.$date."
 quoted=$(printf '%s' "$prefix" | sed 's/\./\\./g')
 # Only published nightlies count, not their architecture or staging tags.
-last=$(grep -Ex -- "${quoted}[1-9][0-9]{0,8}\.g[0-9a-f]{7}" "$nightlies" | sed "s/^${quoted}//; s/\..*//" | sort -n | tail -n 1)
+last=$(grep -Ex -- "${quoted}[1-9][0-9]{0,8}\.g[0-9a-f]{7}" "$nightlies" | cut -d. -f5 | sort -n | tail -n 1)
 printf '%s%d.g%.7s\n' "$prefix" "$((${last:-0} + 1))" "$commit"
