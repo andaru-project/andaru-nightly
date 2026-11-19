@@ -90,8 +90,7 @@ jobs:
             ;;
           *) echo "::error::raw.githubusercontent.com answered $status"; exit 1 ;;
           esac
-          refs --tags --refs "https://github.com/$SOURCE" 'v*' | sed 's#.*refs/tags/##' >release-tags
-          version=$(sh scripts/nightly-version.sh release-tags nightly-tags "$(date -u +%Y%m%d)" "$commit")
+          version=$(sh scripts/nightly-version.sh nightly-tags "$(date -u +%F)" "$commit")
           # One base digest for both architectures: stable may move between the two builds.
           if [ -z "$FCOS_BASE" ]; then
             index=$(timeout 120 skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)
