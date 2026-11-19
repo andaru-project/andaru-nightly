@@ -25,10 +25,23 @@ env:
   IMAGE: ghcr.io/andaru-project/andaru-nightly
 
 jobs:
+  # GitHub disables a public repository's schedules after 60 days without a commit, and publishing images is not
+  # one. Enabling the workflow again each night resets that clock. Its own job: its token may change workflows, and
+  # a failure here must not cost a nightly.
+  keepalive:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the schedule alive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable nightly.yml -R "$GITHUB_REPOSITORY"
+
   plan:
     runs-on: ubuntu-24.04
     permissions:
-      actions: write
       contents: read
       packages: read
     outputs:
@@ -42,19 +55,12 @@ jobs:
         with:
           persist-credentials: false
 
-      # GitHub disables a public repository's schedules after 60 days without a commit, and publishing images is not
-      # one. Enabling the workflow again each night resets that clock.
-      - name: Keep the schedule alive
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow enable nightly.yml -R "$GITHUB_REPOSITORY"
-
       - name: Decide
         id: plan
         shell: bash
         env:
           TOKEN: ${{ github.token }}
-          FORCE: ${{ inputs.force || false }}
+          FORCE: ${{ inputs.force }}
           # A digest pin for the base, set as an organization or repository variable to avoid a Fedora CoreOS release.
           FCOS_BASE: ${{ vars.FCOS_BASE }}
         run: |
@@ -62,32 +68,50 @@ jobs:
           printf '%s\n' "$TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           # ls-remote matches by suffix: only the exact ref counts, so no branch named */refs/heads/main can add a line.
           commit=$(git ls-remote "https://github.com/$SOURCE" refs/heads/main | awk -F'\t' '$2 == "refs/heads/main" { print $1 }')
-          [ "${#commit}" = 40 ]
+          [ "${#commit}" = 40 ] || { echo "::error::no single commit for $SOURCE main: '$commit'"; exit 1; }
+          # GHCR answers a package or tag that does not exist with these; anything else (an outage) stops the run, so
+          # it is never taken for a first run that would start N again at 1.
+          absent() { grep -qiE 'denied|manifest unknown|name unknown|not found' "$1"; }
           # The last nightly records the commit it was built from; none yet means build.
-          last=$(skopeo inspect --no-tags "docker://$IMAGE:nightly" 2>/dev/null |
-            jq -r '.Labels["org.opencontainers.image.revision"] // empty') || last=
+          if skopeo inspect --no-tags "docker://$IMAGE:nightly" >nightly.json 2>inspect.err; then
+            last=$(jq -r '.Labels["org.opencontainers.image.revision"] // empty' nightly.json)
+          elif absent inspect.err; then
+            last=
+          else
+            cat inspect.err >&2
+            exit 1
+          fi
           if [ "$commit" = "$last" ] && [ "$FORCE" != true ]; then
             echo "main is still at $commit, the last nightly's commit: nothing to build" >>"$GITHUB_STEP_SUMMARY"
             echo build=false >>"$GITHUB_OUTPUT"
             exit 0
           fi
-          # Andaru's image must trust the nightly key before a nightly of it can be verified.
-          if ! curl -fsSI "https://raw.githubusercontent.com/$SOURCE/$commit/image/cosign-nightly.pub" >/dev/null; then
+          # Andaru's image must trust the nightly key before a nightly of it can be verified. Only a 404 means it does
+          # not; any other answer is an outage, which fails the run instead of skipping it quietly.
+          status=$(curl -sS -o /dev/null -w '%{http_code}' -I "https://raw.githubusercontent.com/$SOURCE/$commit/image/cosign-nightly.pub")
+          case $status in
+          200) ;;
+          404)
             echo "$commit ships no image/cosign-nightly.pub: nothing to build" >>"$GITHUB_STEP_SUMMARY"
             echo build=false >>"$GITHUB_OUTPUT"
             exit 0
-          fi
+            ;;
+          *) echo "::error::raw.githubusercontent.com answered $status"; exit 1 ;;
+          esac
           git ls-remote --tags --refs "https://github.com/$SOURCE" 'v*' | sed 's#.*refs/tags/##' >release-tags
-          if ! skopeo list-tags "docker://$IMAGE" >listing.json; then
-            # GHCR denies a package that does not exist yet. With no nightly found above, that is the first run;
-            # with one found, a failed listing could reuse a published N, so it stops the run.
-            [ -z "$last" ]
+          if ! skopeo list-tags "docker://$IMAGE" >listing.json 2>list.err; then
+            # Only a package that does not exist yet, with no nightly found above, is a first run.
+            if [ -n "$last" ] || ! absent list.err; then
+              cat list.err >&2
+              exit 1
+            fi
             echo '{"Tags":[]}' >listing.json
           fi
           jq -r '.Tags[]' listing.json >nightly-tags
           version=$(sh scripts/nightly-version.sh release-tags nightly-tags "$(date -u +%Y%m%d)" "$commit")
           # One base digest for both architectures: stable may move between the two builds.
           base=${FCOS_BASE:-"quay.io/fedora/fedora-coreos@sha256:$(skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)"}
+          case $base in *@sha256:*) ;; *) echo "::error::FCOS_BASE must be a digest reference: $base"; exit 1 ;; esac
           {
             echo build=true
             echo "commit=$commit"

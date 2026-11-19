@@ -54,12 +54,25 @@ check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
 # A nightly tag outside the grammar, N 0 or a short commit, does not count.
 nightlies 1.2.4-nightly.20261119.0.g1111111 1.2.4-nightly.20261119.5.g111111 x1.2.4-nightly.20261119.7.g1111111
 check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
+# A full commit, as the workflow passes, and lengths up to 40.
+check 1.2.4-nightly.20261119.1.g0123456 20261119 0123456789abcdef0123456789abcdef01234567
+check 1.2.4-nightly.20261119.1.g0123456 20261119 0123456789abcdef0123456789abcdef0123
+# An N too long to count does not overflow.
+nightlies 1.2.4-nightly.20261119.99999999999999999999.g1111111
+check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
+# A released core is matched literally: v1-2-4 does not release 1.2.4.
+tags v1.2.3 v1.2.4-rc.1 v1-2-4
+nightlies
+check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
 check "(refused)" 2026111 abcdef0
 check "(refused)" 202611190 abcdef0
 check "(refused)" 20261119 abcdef
 check "(refused)" 20261119 0123456789abcdef0123456789abcdef012345678
 check "(refused)" 20261119 "$(printf 'abcdef0\n1234567')"
 check "(refused)" 20261119 xyz
+rm "$dir/nightlies"
+check "(refused)" 20261119 abcdef0
+nightlies
 rm "$dir/releases"
 check "(refused)" 20261119 abcdef0
 exit "$failed"
