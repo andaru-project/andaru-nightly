@@ -27,10 +27,10 @@ env:
 jobs:
   # GitHub disables a public repository's schedules after 60 days without a commit, and publishing images is not
   # one. Enabling the workflow again each night resets that clock. Its own job: its token may change workflows, and
-  # a failure here must not cost a nightly.
+  # nothing needs it, so a failure here turns the run red without costing the nightly.
   keepalive:
     runs-on: ubuntu-24.04
-    continue-on-error: true
+    timeout-minutes: 5
     permissions:
       actions: write
     steps:
@@ -41,6 +41,7 @@ jobs:
 
   plan:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read
@@ -69,9 +70,10 @@ jobs:
           # ls-remote matches by suffix: only the exact ref counts, so no branch named */refs/heads/main can add a line.
           commit=$(git ls-remote "https://github.com/$SOURCE" refs/heads/main | awk -F'\t' '$2 == "refs/heads/main" { print $1 }')
           [ "${#commit}" = 40 ] || { echo "::error::no single commit for $SOURCE main: '$commit'"; exit 1; }
-          # GHCR answers a package or tag that does not exist with these; anything else (an outage) stops the run, so
-          # it is never taken for a first run that would start N again at 1.
-          absent() { grep -qiE 'denied|manifest unknown|name unknown|not found' "$1"; }
+          # GHCR answers a package or tag that does not exist with these registry errors; anything else (an outage, a
+          # missing tool) stops the run, so it is never taken for a first run that would start N again at 1. GHCR also
+          # says denied when this token lost access to an existing package: that run then fails at its first push.
+          absent() { grep -qE 'requested access to the resource is denied|manifest unknown|name unknown|MANIFEST_UNKNOWN|NAME_UNKNOWN|DENIED' "$1"; }
           # The last nightly records the commit it was built from; none yet means build.
           if skopeo inspect --no-tags "docker://$IMAGE:nightly" >nightly.json 2>inspect.err; then
             last=$(jq -r '.Labels["org.opencontainers.image.revision"] // empty' nightly.json)
@@ -88,7 +90,7 @@ jobs:
           fi
           # Andaru's image must trust the nightly key before a nightly of it can be verified. Only a 404 means it does
           # not; any other answer is an outage, which fails the run instead of skipping it quietly.
-          status=$(curl -sS -o /dev/null -w '%{http_code}' -I "https://raw.githubusercontent.com/$SOURCE/$commit/image/cosign-nightly.pub")
+          status=$(curl -sS --max-time 60 -o /dev/null -w '%{http_code}' -I "https://raw.githubusercontent.com/$SOURCE/$commit/image/cosign-nightly.pub")
           case $status in
           200) ;;
           404)
@@ -111,7 +113,7 @@ jobs:
           version=$(sh scripts/nightly-version.sh release-tags nightly-tags "$(date -u +%Y%m%d)" "$commit")
           # One base digest for both architectures: stable may move between the two builds.
           base=${FCOS_BASE:-"quay.io/fedora/fedora-coreos@sha256:$(skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)"}
-          case $base in *@sha256:*) ;; *) echo "::error::FCOS_BASE must be a digest reference: $base"; exit 1 ;; esac
+          [[ $base =~ @sha256:[0-9a-f]{64}$ ]] || { echo "::error::FCOS_BASE must be a digest reference: $base"; exit 1; }
           {
             echo build=true
             echo "commit=$commit"
