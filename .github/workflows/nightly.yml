@@ -44,7 +44,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      packages: read
     outputs:
       build: ${{ steps.plan.outputs.build }}
       commit: ${{ steps.plan.outputs.commit }}
@@ -56,37 +55,27 @@ jobs:
         with:
           persist-credentials: false
 
+      # Every published nightly is a tag of this repository, named by its version: git, not the registry, says what
+      # was published, so no registry error can be mistaken for "nothing published yet".
       - name: Decide
         id: plan
         shell: bash
         env:
-          TOKEN: ${{ github.token }}
           FORCE: ${{ inputs.force }}
           # A digest pin for the base, set as an organization or repository variable to avoid a Fedora CoreOS release.
           FCOS_BASE: ${{ vars.FCOS_BASE }}
         run: |
           set -euo pipefail
-          printf '%s\n' "$TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          refs() { timeout 120 git ls-remote "$@"; }
           # ls-remote matches by suffix: only the exact ref counts, so no branch named */refs/heads/main can add a line.
-          commit=$(git ls-remote "https://github.com/$SOURCE" refs/heads/main | awk -F'\t' '$2 == "refs/heads/main" { print $1 }')
+          commit=$(refs "https://github.com/$SOURCE" refs/heads/main | awk -F'\t' '$2 == "refs/heads/main" { print $1 }')
           [ "${#commit}" = 40 ] || { echo "::error::no single commit for $SOURCE main: '$commit'"; exit 1; }
-          # GHCR answers a package or tag that does not exist with these registry errors; anything else (an outage, a
-          # missing tool) stops the run, so it is never taken for a first run that would start N again at 1. GHCR also
-          # says denied when this token lost access to an existing package: that run then fails at its first push.
-          absent() { grep -qE 'requested access to the resource is denied|registry 403 \(Forbidden\)|manifest unknown|name unknown|MANIFEST_UNKNOWN|NAME_UNKNOWN|DENIED' "$1"; }
-          # The last nightly records the commit it was built from; none yet means build.
-          if skopeo inspect --no-tags "docker://$IMAGE:nightly" >nightly.json 2>inspect.err; then
-            published=true
-            last=$(jq -r '.Labels["org.opencontainers.image.revision"] // empty' nightly.json)
-          elif absent inspect.err; then
-            published=false
-            last=
-          else
-            cat inspect.err >&2
-            exit 1
-          fi
-          if [ "$commit" = "$last" ] && [ "$FORCE" != true ]; then
-            echo "main is still at $commit, the last nightly's commit: nothing to build" >>"$GITHUB_STEP_SUMMARY"
+          refs --tags --refs "https://github.com/$GITHUB_REPOSITORY" | sed 's#.*refs/tags/##' >nightly-tags
+          # The newest nightly, by date then N: its name ends in g and the first 7 characters of its commit.
+          newest=$(grep -E -- '-nightly\.[0-9]{8}\.[1-9][0-9]{0,8}\.g[0-9a-f]{7}$' nightly-tags |
+            sort -t. -k4,4n -k5,5n | tail -n 1)
+          if [ "${newest##*.g}" = "${commit:0:7}" ] && [ "$FORCE" != true ]; then
+            echo "main is still at $commit, the last nightly's commit ($newest): nothing to build" >>"$GITHUB_STEP_SUMMARY"
             echo build=false >>"$GITHUB_OUTPUT"
             exit 0
           fi
@@ -102,25 +91,20 @@ jobs:
             ;;
           *) echo "::error::raw.githubusercontent.com answered $status"; exit 1 ;;
           esac
-          git ls-remote --tags --refs "https://github.com/$SOURCE" 'v*' | sed 's#.*refs/tags/##' >release-tags
-          if ! skopeo list-tags "docker://$IMAGE" >listing.json 2>list.err; then
-            # Only a package that does not exist yet, with no nightly found above, is a first run.
-            if [ "$published" = true ] || ! absent list.err; then
-              cat list.err >&2
-              exit 1
-            fi
-            echo '{"Tags":[]}' >listing.json
-          fi
-          jq -r '.Tags[]' listing.json >nightly-tags
+          refs --tags --refs "https://github.com/$SOURCE" 'v*' | sed 's#.*refs/tags/##' >release-tags
           version=$(sh scripts/nightly-version.sh release-tags nightly-tags "$(date -u +%Y%m%d)" "$commit")
           # One base digest for both architectures: stable may move between the two builds.
-          base=${FCOS_BASE:-"quay.io/fedora/fedora-coreos@sha256:$(skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)"}
-          [[ $base =~ @sha256:[0-9a-f]{64}$ ]] || { echo "::error::FCOS_BASE must be a digest reference: $base"; exit 1; }
+          if [ -z "$FCOS_BASE" ]; then
+            index=$(timeout 120 skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)
+            FCOS_BASE=quay.io/fedora/fedora-coreos@sha256:$index
+          fi
+          [[ $FCOS_BASE =~ ^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+@sha256:[0-9a-f]{64}$ ]] ||
+            { echo "::error::FCOS_BASE must be an image digest reference: $FCOS_BASE"; exit 1; }
           {
             echo build=true
             echo "commit=$commit"
             echo "version=$version"
-            echo "base=$base"
+            echo "base=$FCOS_BASE"
           } >>"$GITHUB_OUTPUT"
 
   image:
@@ -235,3 +219,18 @@ jobs:
             skopeo copy --all --preserve-digests "docker://$IMAGE@$digest" "docker://$IMAGE:$tag"
           done
           echo "$IMAGE@$digest: $VERSION nightly" >>"$GITHUB_STEP_SUMMARY"
+
+  # The tag that records the published nightly, which the next night's plan reads. Last, and with its own token: it
+  # needs to write this repository, and nothing else may.
+  record:
+    needs: [plan, sign]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Tag this repository with the nightly's version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$VERSION" -f sha="$GITHUB_SHA" >/dev/null
