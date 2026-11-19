@@ -11,10 +11,13 @@ set -eu
 
 releases=${1:?release tags} nightlies=${2:?nightly tags} date=${3:?date} commit=${4:?commit}
 [ -r "$releases" ] && [ -r "$nightlies" ] || { echo "nightly-version.sh: cannot read the tag lists" >&2; exit 1; }
-printf '%s\n' "$date" | grep -Eqx '[0-9]{8}' || { echo "nightly-version.sh: bad date $date" >&2; exit 1; }
-printf '%s\n' "$commit" | grep -Eqx '[0-9a-f]{7,40}' || { echo "nightly-version.sh: bad commit $commit" >&2; exit 1; }
+# case, not grep: grep would accept a value with a second line.
+case $date in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) echo "nightly-version.sh: bad date" >&2; exit 1 ;; esac
+case ${#commit}:$commit in [7-9]:* | [1-3][0-9]:* | 40:*) ;; *) echo "nightly-version.sh: bad commit" >&2; exit 1 ;; esac
+case $commit in *[!0-9a-f]*) echo "nightly-version.sh: bad commit" >&2; exit 1 ;; esac
 
-n='(0|[1-9][0-9]*)'
+# At most nine digits a number: arithmetic on more would overflow, and no real version needs them.
+n='(0|[1-9][0-9]{0,8})'
 core=$(grep -Ex "v$n\.$n\.$n(-(a\.|b\.|rc\.?)[1-9][0-9]*)?" "$releases" | sed -E 's/^v//; s/-.*//' |
 	sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
 if [ -z "$core" ]; then

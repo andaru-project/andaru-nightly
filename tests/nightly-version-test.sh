@@ -39,7 +39,26 @@ nightlies 1.3.1-nightly.20261119.2.g2222222
 check 1.3.1-nightly.20261119.3.gabcdef0 20261119 abcdef0
 nightlies 1.3.1-nightly.20261119.9.g2222222 1.3.1-nightly.20261119.10.g3333333
 check 1.3.1-nightly.20261119.11.gabcdef0 20261119 abcdef0
+# Patch numbers compare as numbers.
+tags v1.2.9 v1.2.10
+nightlies
+check 1.2.11-nightly.20261119.1.gabcdef0 20261119 abcdef0
+# The highest core in beta, or in candidates only, is the version.
+tags v1.2.3 v1.3.0-b.1
+check 1.3.0-nightly.20261119.1.gabcdef0 20261119 abcdef0
+tags v1.2.3 v1.3.0-rc.4
+check 1.3.0-nightly.20261119.1.gabcdef0 20261119 abcdef0
+# Tags outside the grammar, and numbers too long to count, do not move it.
+tags v1.2.3 xv9.0.0 v9.0 v9.0.0-c.1 v9.0.0-rc.0 v1000000000.0.0
+check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
+# A nightly tag outside the grammar, N 0 or a short commit, does not count.
+nightlies 1.2.4-nightly.20261119.0.g1111111 1.2.4-nightly.20261119.5.g111111 x1.2.4-nightly.20261119.7.g1111111
+check 1.2.4-nightly.20261119.1.gabcdef0 20261119 abcdef0
 check "(refused)" 2026111 abcdef0
+check "(refused)" 202611190 abcdef0
+check "(refused)" 20261119 abcdef
+check "(refused)" 20261119 0123456789abcdef0123456789abcdef012345678
+check "(refused)" 20261119 "$(printf 'abcdef0\n1234567')"
 check "(refused)" 20261119 xyz
 rm "$dir/releases"
 check "(refused)" 20261119 abcdef0

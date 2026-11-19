@@ -28,6 +28,7 @@ jobs:
   plan:
     runs-on: ubuntu-24.04
     permissions:
+      actions: write
       contents: read
       packages: read
     outputs:
@@ -41,6 +42,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # GitHub disables a public repository's schedules after 60 days without a commit, and publishing images is not
+      # one. Enabling the workflow again each night resets that clock.
+      - name: Keep the schedule alive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable nightly.yml -R "$GITHUB_REPOSITORY"
+
       - name: Decide
         id: plan
         shell: bash
@@ -52,8 +60,9 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' "$TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          commit=$(git ls-remote "https://github.com/$SOURCE" refs/heads/main | cut -f1)
-          [ -n "$commit" ]
+          # ls-remote matches by suffix: only the exact ref counts, so no branch named */refs/heads/main can add a line.
+          commit=$(git ls-remote "https://github.com/$SOURCE" refs/heads/main | awk -F'\t' '$2 == "refs/heads/main" { print $1 }')
+          [ "${#commit}" = 40 ]
           # The last nightly records the commit it was built from; none yet means build.
           last=$(skopeo inspect --no-tags "docker://$IMAGE:nightly" 2>/dev/null |
             jq -r '.Labels["org.opencontainers.image.revision"] // empty') || last=
