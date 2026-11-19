@@ -76,8 +76,10 @@ jobs:
           absent() { grep -qE 'requested access to the resource is denied|registry 403 \(Forbidden\)|manifest unknown|name unknown|MANIFEST_UNKNOWN|NAME_UNKNOWN|DENIED' "$1"; }
           # The last nightly records the commit it was built from; none yet means build.
           if skopeo inspect --no-tags "docker://$IMAGE:nightly" >nightly.json 2>inspect.err; then
+            published=true
             last=$(jq -r '.Labels["org.opencontainers.image.revision"] // empty' nightly.json)
           elif absent inspect.err; then
+            published=false
             last=
           else
             cat inspect.err >&2
@@ -103,7 +105,7 @@ jobs:
           git ls-remote --tags --refs "https://github.com/$SOURCE" 'v*' | sed 's#.*refs/tags/##' >release-tags
           if ! skopeo list-tags "docker://$IMAGE" >listing.json 2>list.err; then
             # Only a package that does not exist yet, with no nightly found above, is a first run.
-            if [ -n "$last" ] || ! absent list.err; then
+            if [ "$published" = true ] || ! absent list.err; then
               cat list.err >&2
               exit 1
             fi
