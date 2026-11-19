@@ -97,7 +97,7 @@ jobs:
             index=$(timeout 120 skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)
             FCOS_BASE=quay.io/fedora/fedora-coreos@sha256:$index
           fi
-          [[ $FCOS_BASE =~ ^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+@sha256:[0-9a-f]{64}$ ]] ||
+          [[ $FCOS_BASE =~ ^[a-z0-9][a-z0-9.-]*(:[0-9]+)?(/[a-z0-9._-]+)+@sha256:[0-9a-f]{64}$ ]] ||
             { echo "::error::FCOS_BASE must be an image digest reference: $FCOS_BASE"; exit 1; }
           {
             echo build=true
@@ -235,11 +235,12 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$VERSION" -f sha="$GITHUB_SHA" >/dev/null
 
-  # A publish that failed after the record would leave the commit marked as built with no image: the record goes again,
-  # so the next night builds it. The version may then be reused, but only for this same commit.
+  # A publish that failed or was cancelled after the record would leave the commit marked as built with no image: the
+  # record goes again, so the next night builds it. The version may then be reused, but only for this same commit. A
+  # record whose creation timed out after it succeeded needs its tag deleted by hand.
   unrecord:
     needs: [plan, record, publish]
-    if: failure() && needs.record.result == 'success'
+    if: (failure() || cancelled()) && needs.record.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -267,7 +268,8 @@ jobs:
         run: |
           set -eu
           printf '%s\n' "$TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          for tag in "$VERSION" nightly; do
+          # nightly first: a failure in between never leaves the version tag on a build the record then forgets.
+          for tag in nightly "$VERSION"; do
             skopeo copy --all --preserve-digests "docker://$IMAGE@$DIGEST" "docker://$IMAGE:$tag"
           done
           echo "$IMAGE@$DIGEST: $VERSION nightly" >>"$GITHUB_STEP_SUMMARY"

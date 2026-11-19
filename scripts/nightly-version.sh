@@ -2,7 +2,7 @@
 # Prints a nightly's version: <next version>-nightly.<YYYYMMDD>.<N>.g<7-character commit>.
 #   nightly-version.sh RELEASE_TAGS NIGHTLY_TAGS DATE COMMIT
 # RELEASE_TAGS lists Andaru's tags, one per line: v1.2.3, v1.2.3-a.N, -b.N, -rc.N, and the older -rcN. NIGHTLY_TAGS
-# lists the nightly image's tags. The next version is the highest tagged version's core, one patch up once that core
+# lists this repository's tags, one per published nightly. The next version is the highest tagged version's core, one patch up once that core
 # is released, so a nightly sorts above every release before it. A nightly of a core still in prerelease sorts above
 # that core's alphas and betas but below its candidates ("a" < "b" < "nightly" < "rc"); nightlies are their own
 # channel, never ordered against releases by an updater. N is one above the highest N that day's nightlies of that
@@ -34,6 +34,6 @@ else
 fi
 prefix="$next-nightly.$date."
 quoted=$(printf '%s' "$prefix" | sed 's/\./\\./g')
-# Only published nightlies count, not their architecture or staging tags.
+# Only whole nightly names count.
 last=$(grep -Ex -- "${quoted}[1-9][0-9]{0,8}\.g[0-9a-f]{7}" "$nightlies" | cut -d. -f5 | sort -n | tail -n 1)
 printf '%s%d.g%.7s\n' "$prefix" "$((${last:-0} + 1))" "$commit"
