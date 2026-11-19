@@ -6,7 +6,10 @@ Nightly prerelease images of [Andaru](https://github.com/andaru-project/andaru),
 Every night at 03:17 UTC, [`nightly.yml`](.github/workflows/nightly.yml) compares Andaru's `main` with the commit the
 last nightly was built from (its `org.opencontainers.image.revision` label). If `main` moved, it builds the image
 from that commit for x86_64 and aarch64, signs it with the nightly key, and tags it with its version and `nightly`.
-Otherwise it builds nothing. `workflow_dispatch` runs the same check on demand.
+Otherwise it builds nothing. `workflow_dispatch` runs the same check on demand; its `force` input builds anyway, for
+example to pick up a new Fedora CoreOS base. A `FCOS_BASE` variable pins the base digest, as for releases.
+
+It builds nothing until Andaru's `main` ships `image/cosign-nightly.pub`, the key the image trusts for nightlies.
 
 **Versions** are `<next version>-nightly.<YYYYMMDD>.<N>.g<commit>`, for example `1.3.1-nightly.20261119.2.g0123456`.
 The next version is the core of Andaru's highest version tag, one patch up once that core is released. `N` counts that

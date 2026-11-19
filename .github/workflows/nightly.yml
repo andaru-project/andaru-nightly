@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: Build even if main has not moved since the last nightly
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,6 +46,9 @@ jobs:
         shell: bash
         env:
           TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || false }}
+          # A digest pin for the base, set as an organization or repository variable to avoid a Fedora CoreOS release.
+          FCOS_BASE: ${{ vars.FCOS_BASE }}
         run: |
           set -euo pipefail
           printf '%s\n' "$TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
@@ -49,21 +57,28 @@ jobs:
           # The last nightly records the commit it was built from; none yet means build.
           last=$(skopeo inspect --no-tags "docker://$IMAGE:nightly" 2>/dev/null |
             jq -r '.Labels["org.opencontainers.image.revision"] // empty') || last=
-          if [ "$commit" = "$last" ]; then
+          if [ "$commit" = "$last" ] && [ "$FORCE" != true ]; then
             echo "main is still at $commit, the last nightly's commit: nothing to build" >>"$GITHUB_STEP_SUMMARY"
             echo build=false >>"$GITHUB_OUTPUT"
             exit 0
           fi
+          # Andaru's image must trust the nightly key before a nightly of it can be verified.
+          if ! curl -fsSI "https://raw.githubusercontent.com/$SOURCE/$commit/image/cosign-nightly.pub" >/dev/null; then
+            echo "$commit ships no image/cosign-nightly.pub: nothing to build" >>"$GITHUB_STEP_SUMMARY"
+            echo build=false >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           git ls-remote --tags --refs "https://github.com/$SOURCE" 'v*' | sed 's#.*refs/tags/##' >release-tags
-          if ! skopeo list-tags "docker://$IMAGE" >listing.json 2>listing.err; then
-            # Only a package that does not exist yet has no tags; anything else stops the run.
-            grep -qiE 'not found|name unknown|unknown repository' listing.err
+          if ! skopeo list-tags "docker://$IMAGE" >listing.json; then
+            # GHCR denies a package that does not exist yet. With no nightly found above, that is the first run;
+            # with one found, a failed listing could reuse a published N, so it stops the run.
+            [ -z "$last" ]
             echo '{"Tags":[]}' >listing.json
           fi
           jq -r '.Tags[]' listing.json >nightly-tags
           version=$(sh scripts/nightly-version.sh release-tags nightly-tags "$(date -u +%Y%m%d)" "$commit")
           # One base digest for both architectures: stable may move between the two builds.
-          base="quay.io/fedora/fedora-coreos@sha256:$(skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)"
+          base=${FCOS_BASE:-"quay.io/fedora/fedora-coreos@sha256:$(skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)"}
           {
             echo build=true
             echo "commit=$commit"
