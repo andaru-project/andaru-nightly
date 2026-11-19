@@ -15,11 +15,11 @@ die() {
 	echo "nightly-version.sh: $*" >&2
 	exit 1
 }
-[ -r "$releases" ] && [ -r "$nightlies" ] || die "cannot read the tag lists"
+if [ ! -r "$releases" ] || [ ! -r "$nightlies" ]; then die "cannot read the tag lists"; fi
 # case, not grep: grep would accept a value with a second line.
 case $date in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) die "bad date" ;; esac
 case $commit in *[!0-9a-f]*) die "bad commit" ;; esac
-[ "${#commit}" -ge 7 ] && [ "${#commit}" -le 40 ] || die "bad commit"
+if [ "${#commit}" -lt 7 ] || [ "${#commit}" -gt 40 ]; then die "bad commit"; fi
 
 # At most nine digits a number: arithmetic on more would overflow, and no real version needs them.
 n='(0|[1-9][0-9]{0,8})'
