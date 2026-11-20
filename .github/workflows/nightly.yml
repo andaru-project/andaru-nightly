@@ -1,15 +1,16 @@
 name: Nightly
 
-# Every night, when andaru-project/andaru's main moved since the last nightly, builds Andaru's image from it for both
-# architectures, signs it with the nightly-signing environment's cosign key, and only then tags it with its version
-# and "nightly". Boxes trust that key only for ghcr.io/andaru-project/andaru-nightly, never for releases.
+# Every night, when andaru-project/andaru's main or Fedora CoreOS's testing stream moved since the last nightly, builds
+# Andaru's image from main on testing for both architectures, signs it with the nightly-signing environment's cosign
+# key, and only then tags it with its version and "nightly". Boxes trust that key only for
+# ghcr.io/andaru-project/andaru-nightly, never for releases.
 on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       force:
-        description: Build even if main has not moved since the last nightly
+        description: Build even if neither main nor the base has moved since the last nightly
         type: boolean
         default: false
 
@@ -73,10 +74,22 @@ jobs:
           refs --tags --refs "https://github.com/$GITHUB_REPOSITORY" | sed 's#.*refs/tags/##' >nightly-tags
           # The commit the newest nightly was built from, by its first 7 characters; none yet is an empty answer.
           newest=$(sh scripts/nightly-newest.sh nightly-tags)
+          # Fedora CoreOS's testing stream, which becomes stable about two weeks later: a base that breaks Andaru shows
+          # up in a nightly before it reaches a release. One digest for both architectures: it may move between builds.
+          if [ -z "$FCOS_BASE" ]; then
+            index=$(timeout 120 skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:testing | sha256sum | cut -d' ' -f1)
+            FCOS_BASE=quay.io/fedora/fedora-coreos@sha256:$index
+          fi
+          [[ $FCOS_BASE =~ ^[a-z0-9][a-z0-9.-]*(:[0-9]+)?(/[a-z0-9._-]+)+@sha256:[0-9a-f]{64}$ ]] ||
+            { echo "::error::FCOS_BASE must be an image digest reference: $FCOS_BASE"; exit 1; }
           if [ "$(sh scripts/nightly-newest.sh -c nightly-tags)" = "${commit:0:7}" ] && [ "$FORCE" != true ]; then
-            echo "main is still at $commit, the last nightly's commit ($newest): nothing to build" >>"$GITHUB_STEP_SUMMARY"
-            echo build=false >>"$GITHUB_OUTPUT"
-            exit 0
+            # The base the newest nightly was built on, from its label; a nightly from before the label has none.
+            last=$(timeout 120 skopeo inspect "docker://$IMAGE:$newest" | jq -r '.Labels["org.opencontainers.image.base.name"] // ""')
+            if [ "$last" = "$FCOS_BASE" ]; then
+              echo "main is still at $commit and the base at $FCOS_BASE, as for the last nightly ($newest): nothing to build" >>"$GITHUB_STEP_SUMMARY"
+              echo build=false >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
           # Andaru's image must trust the nightly key before a nightly of it can be verified. Only a 404 means it does
           # not; any other answer is an outage, which fails the run instead of skipping it quietly.
@@ -91,13 +104,6 @@ jobs:
           *) echo "::error::raw.githubusercontent.com answered $status"; exit 1 ;;
           esac
           version=$(sh scripts/nightly-version.sh nightly-tags "$(date -u +%F)" "$commit")
-          # One base digest for both architectures: stable may move between the two builds.
-          if [ -z "$FCOS_BASE" ]; then
-            index=$(timeout 120 skopeo inspect --raw docker://quay.io/fedora/fedora-coreos:stable | sha256sum | cut -d' ' -f1)
-            FCOS_BASE=quay.io/fedora/fedora-coreos@sha256:$index
-          fi
-          [[ $FCOS_BASE =~ ^[a-z0-9][a-z0-9.-]*(:[0-9]+)?(/[a-z0-9._-]+)+@sha256:[0-9a-f]{64}$ ]] ||
-            { echo "::error::FCOS_BASE must be an image digest reference: $FCOS_BASE"; exit 1; }
           {
             echo build=true
             echo "commit=$commit"
@@ -137,7 +143,8 @@ jobs:
         run: |
           set -eu
           podman build -f image/Containerfile --build-arg VERSION="$VERSION" --build-arg BASE_IMAGE="$BASE" \
-            --label org.opencontainers.image.revision="$COMMIT" -t andaru:nightly .
+            --label org.opencontainers.image.revision="$COMMIT" --label org.opencontainers.image.base.name="$BASE" \
+            -t andaru:nightly .
           sh scripts/ci/rechunk.sh andaru:nightly
           sh scripts/ci/image-smoke.sh andaru:nightly "$VERSION"
 
