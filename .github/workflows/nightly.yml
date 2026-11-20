@@ -138,6 +138,7 @@ jobs:
           set -eu
           podman build -f image/Containerfile --build-arg VERSION="$VERSION" --build-arg BASE_IMAGE="$BASE" \
             --label org.opencontainers.image.revision="$COMMIT" -t andaru:nightly .
+          sh scripts/ci/rechunk.sh andaru:nightly
           sh scripts/ci/image-smoke.sh andaru:nightly "$VERSION"
 
       - name: Push the unsigned architecture image
